@@ -1,0 +1,126 @@
+name: Build Executables
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            arch: x64
+            runner: windows-latest
+            use_system_python: false
+            python_arch: x64
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            use_system_python: false
+            python_arch: x64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            use_system_python: true
+            python_arch: arm64
+          - os: linux
+            arch: arm
+            runner: ubuntu-latest
+            use_system_python: true
+            python_arch: arm
+          - os: macos
+            arch: x64
+            runner: macos-13
+            use_system_python: false
+            python_arch: x64
+          - os: macos
+            arch: arm64
+            runner: macos-latest
+            use_system_python: false
+            python_arch: arm64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: matrix.use_system_python == false
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Use system Python for Linux ARM / ARM64
+        if: matrix.use_system_python == true
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip python3-venv
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pyinstaller
+
+      - name: Install PyInstaller for non-system Python
+        if: matrix.use_system_python == false
+        shell: bash
+        run: pip install pyinstaller
+
+      - name: Build executable
+        shell: bash
+        run: |
+          echo "Building for ${{ matrix.os }}-${{ matrix.arch }}"
+          PYTHON_CMD="python3"
+          if [[ "${{ matrix.use_system_python }}" == "false" ]]; then
+            PYTHON_CMD="python"
+          fi
+          if [[ "${{ matrix.os }}" == "windows" ]]; then
+            $PYTHON_CMD -m PyInstaller --onefile arcli.py \
+              --add-data "${{ github.workspace }}\\font1.txt;." \
+              --add-data "${{ github.workspace }}\\font2.txt;." \
+              --add-data "${{ github.workspace }}\\font3.txt;." \
+              --add-data "${{ github.workspace }}\\font4.txt;." \
+              --add-data "${{ github.workspace }}\\font5.txt;." \
+              --add-data "${{ github.workspace }}\\font6.txt;."
+          elif [[ "${{ matrix.os }}" == "linux" && "${{ matrix.arch }}" == "arm" ]]; then
+            sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
+            $PYTHON_CMD -m PyInstaller --onefile arcli.py \
+              --add-data "$(pwd)/font1.txt:." \
+              --add-data "$(pwd)/font2.txt:." \
+              --add-data "$(pwd)/font3.txt:." \
+              --add-data "$(pwd)/font4.txt:." \
+              --add-data "$(pwd)/font5.txt:." \
+              --add-data "$(pwd)/font6.txt:." \
+              --distpath dist-armlinux \
+              --workpath build-armlinux \
+              --specpath build-armlinux
+          else
+            $PYTHON_CMD -m PyInstaller --onefile arcli.py \
+              --add-data "$(pwd)/font1.txt:." \
+              --add-data "$(pwd)/font2.txt:." \
+              --add-data "$(pwd)/font3.txt:." \
+              --add-data "$(pwd)/font4.txt:." \
+              --add-data "$(pwd)/font5.txt:." \
+              --add-data "$(pwd)/font6.txt:."
+          fi
+
+      - name: Organize output
+        shell: bash
+        run: |
+          mkdir -p release
+          if [[ "${{ matrix.os }}" == "windows" ]]; then
+            mv dist/arcli.exe release/arcli-${{ matrix.os }}-${{ matrix.arch }}.exe
+          elif [[ "${{ matrix.os }}" == "linux" && "${{ matrix.arch }}" == "arm" ]]; then
+            mv dist-armlinux/arcli release/arcli-linux-arm
+          else
+            mv dist/arcli release/arcli-${{ matrix.os }}-${{ matrix.arch }}
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arcli-${{ matrix.os }}-${{ matrix.arch }}
+          path: release/*
